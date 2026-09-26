@@ -25,7 +25,7 @@ export async function PUT(request) {
     const data = db || { ...EMPTY_DB, photos: [], socials: [] };
 
     if (body.siteName !== undefined) {
-      data.siteName = String(body.siteName).trim().slice(0, 60) || 'vyu.frames';
+      data.siteName = String(body.siteName).trim().slice(0, 60) || 'QNXEITSG';
     }
     if (body.tagline !== undefined) {
       data.tagline = String(body.tagline).trim().slice(0, 200);

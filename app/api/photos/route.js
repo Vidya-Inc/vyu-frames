@@ -3,9 +3,14 @@ import { isConfigured } from '../../../lib/telegram';
 
 export const dynamic = 'force-dynamic';
 
+// The gallery changes on every upload, so never let a CDN or browser cache it.
+function jsonWithNoStore(data, status = 200) {
+  return Response.json(data, { status, headers: { 'Cache-Control': 'no-store' } });
+}
+
 export async function GET() {
   if (!isConfigured()) {
-    return Response.json({
+    return jsonWithNoStore({
       success: true,
       data: { ...EMPTY_DB, warning: 'Storage is not configured yet (see README).' },
     });
@@ -13,7 +18,7 @@ export async function GET() {
   try {
     const { db } = await readDB();
     const data = db || EMPTY_DB;
-    return Response.json({
+    return jsonWithNoStore({
       success: true,
       data: {
         siteName: data.siteName,
@@ -29,6 +34,6 @@ export async function GET() {
       },
     });
   } catch (e) {
-    return Response.json({ success: false, error: e.message }, { status: 500 });
+    return jsonWithNoStore({ success: false, error: e.message }, 500);
   }
 }
