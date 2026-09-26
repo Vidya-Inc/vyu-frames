@@ -1,6 +1,6 @@
 import { isAdmin } from '../../../../lib/auth';
 import { sendPhoto } from '../../../../lib/telegram';
-import { ensureDB, writeDB } from '../../../../lib/store';
+import { readDB, writeDB, EMPTY_DB } from '../../../../lib/store';
 
 export const dynamic = 'force-dynamic';
 
@@ -59,7 +59,10 @@ export async function POST(request) {
       title
     );
 
-    const { db, msgId: dbMsgId } = await ensureDB();
+    // Single write per upload: read the current state (or start empty), append
+    // the new photo, then replace the pinned database in one go.
+    const { db: existing, msgId: dbMsgId } = await readDB();
+    const db = existing || { ...EMPTY_DB, photos: [], socials: [] };
     const entry = {
       id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
       msgId,
