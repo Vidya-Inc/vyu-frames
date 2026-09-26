@@ -18,17 +18,28 @@ export async function GET(request) {
   try {
     const me = await getMe();
     const chat = await getChat();
+    const pinned = chat.pinned_message;
+    const pinnedInfo = pinned
+      ? {
+          msgId: pinned.message_id,
+          hasDocument: Boolean(pinned.document),
+          fileName: pinned.document?.file_name || null,
+          date: pinned.date,
+        }
+      : null;
     let dbState = 'empty (nothing pinned yet)';
     try {
       const { db } = await readDB();
       if (db) dbState = `ok — ${(db.photos || []).length} photo(s), ${(db.socials || []).length} social link(s)`;
-    } catch {
-      dbState = 'present but unreadable';
+    } catch (e) {
+      dbState = `present but unreadable: ${e.message}`;
     }
     return Response.json({
       success: true,
       bot: `@${me.username}`,
       chat: { title: chat.title || chat.username || String(chat.id), type: chat.type },
+      chatIdTail: String(chat.id).slice(-4),
+      pinned: pinnedInfo,
       database: dbState,
     });
   } catch (e) {
