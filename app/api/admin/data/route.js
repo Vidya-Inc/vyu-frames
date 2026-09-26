@@ -21,7 +21,7 @@ export async function PUT(request) {
 
   try {
     const body = await request.json();
-    const { db, msgId } = await readDB();
+    const { db, msgId, rev } = await readDB();
     const data = db || { ...EMPTY_DB, photos: [], socials: [] };
 
     if (body.siteName !== undefined) {
@@ -34,7 +34,7 @@ export async function PUT(request) {
       data.socials = cleanSocials(body.socials);
     }
 
-    await writeDB(data, msgId);
+    await writeDB(data, { msgId, rev });
     return Response.json({ success: true });
   } catch (e) {
     return Response.json({ success: false, error: e.message }, { status: 500 });

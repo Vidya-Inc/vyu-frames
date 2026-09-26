@@ -60,8 +60,8 @@ export async function POST(request) {
     );
 
     // Single write per upload: read the current state (or start empty), append
-    // the new photo, then replace the pinned database in one go.
-    const { db: existing, msgId: dbMsgId } = await readDB();
+    // the new photo, then replace the stored database in one go.
+    const { db: existing, msgId: dbMsgId, rev: dbRev } = await readDB();
     const db = existing || { ...EMPTY_DB, photos: [], socials: [] };
     const entry = {
       id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
@@ -72,7 +72,7 @@ export async function POST(request) {
       ts: Date.now(),
     };
     db.photos = [entry, ...(db.photos || [])]; // newest first
-    await writeDB(db, dbMsgId);
+    await writeDB(db, { msgId: dbMsgId, rev: dbRev });
 
     return Response.json({
       success: true,

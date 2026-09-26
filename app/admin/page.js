@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 const MAX_RAW = 4 * 1024 * 1024; // Vercel request-body limit headroom
 
@@ -46,7 +46,7 @@ async function api(path, opts = {}, token = null) {
   return { status: res.status, ...data };
 }
 
-function PhotoRow({ photo, token, onDeleted }) {
+function Tile({ photo, token, onDeleted }) {
   const [title, setTitle] = useState(photo.title || '');
   const [desc, setDesc] = useState(photo.desc || '');
   const [busy, setBusy] = useState(false);
@@ -79,33 +79,32 @@ function PhotoRow({ photo, token, onDeleted }) {
   };
 
   return (
-    <div className="photo-row">
-      <img className="photo-thumb" src={photo.src} alt={photo.title || 'Photo'} />
-      <div className="photo-fields">
-        <input
-          className="input"
-          placeholder="Title"
-          value={title}
-          onChange={(e) => setTitle(e.target.value)}
-        />
-        <input
-          className="input"
-          placeholder="Description (optional)"
-          value={desc}
-          onChange={(e) => setDesc(e.target.value)}
-        />
-        <div className="photo-actions">
-          <button className="btn btn-sm" onClick={save} disabled={busy}>
-            Save
-          </button>
-          <button className="btn btn-sm btn-danger" onClick={del} disabled={busy}>
-            Delete
-          </button>
-          {msg && <span className={msg.ok ? 'status-text ok' : 'status-text err'}>{msg.text}</span>}
-        </div>
+    <div className="tile glass">
+      <div className="thumb-wrap">
+        <img src={photo.src} alt={photo.title || 'Photo'} loading="lazy" />
+      </div>
+      <input className="input" placeholder="Title" value={title} onChange={(e) => setTitle(e.target.value)} />
+      <input
+        className="input"
+        placeholder="Description (optional)"
+        value={desc}
+        onChange={(e) => setDesc(e.target.value)}
+      />
+      <div className="t-actions">
+        <button className="gbtn sm primary" onClick={save} disabled={busy}>
+          Save
+        </button>
+        <button className="gbtn sm danger" onClick={del} disabled={busy}>
+          Delete
+        </button>
+        {msg && <span className={msg.ok ? 'status-text ok' : 'status-text err'}>{msg.text}</span>}
       </div>
     </div>
   );
+}
+
+function BrandMark({ letter = 'Q' }) {
+  return <div className="brand-mark">{letter}</div>;
 }
 
 export default function AdminPage() {
@@ -119,9 +118,10 @@ export default function AdminPage() {
   const [loaded, setLoaded] = useState(false);
   const [loadError, setLoadError] = useState('');
 
-  const [uploadFiles, setUploadFiles] = useState(null);
+  const [queue, setQueue] = useState([]); // { name, state: 'pending'|'up'|'ok'|'err', text }
   const [upBusy, setUpBusy] = useState(false);
-  const [upStatus, setUpStatus] = useState(null);
+  const [dragOver, setDragOver] = useState(false);
+  const fileRef = useRef(null);
 
   const [siteName, setSiteName] = useState('');
   const [tagline, setTagline] = useState('');
@@ -129,8 +129,7 @@ export default function AdminPage() {
   const [settingsBusy, setSettingsBusy] = useState(false);
   const [settingsMsg, setSettingsMsg] = useState(null);
 
-  const [testBusy, setTestBusy] = useState(false);
-  const [testResult, setTestResult] = useState(null);
+  const [conn, setConn] = useState(null); // { ok, text, detail }
 
   useEffect(() => {
     api('/api/me').then((r) => setAuthed(Boolean(r.authed)));
@@ -155,6 +154,13 @@ export default function AdminPage() {
         setLoadError(r.error || 'Failed to load');
       }
     });
+    api('/api/admin/test', {}, token).then((r) => {
+      setConn(
+        r.success
+          ? { ok: true, text: `Connected — ${r.bot}`, detail: `${r.chat.title} · database: ${r.database}` }
+          : { ok: false, text: 'Storage check failed', detail: r.error }
+      );
+    });
   }, [authed, token]);
 
   const handleLogin = async (e) => {
@@ -178,14 +184,14 @@ export default function AdminPage() {
     setAuthed(false);
   };
 
-  const handleUpload = async () => {
-    const list = Array.from(uploadFiles || []);
+  const uploadFiles = async (fileList) => {
+    const list = Array.from(fileList || []);
     if (!list.length) return;
     setUpBusy(true);
-    setUpStatus(null);
+    setQueue(list.map((f) => ({ name: f.name, state: 'pending', text: 'queued' })));
     let ok = 0;
     for (let i = 0; i < list.length; i++) {
-      setUpStatus({ ok: null, text: `Uploading ${i + 1} / ${list.length} — ${list[i].name}` });
+      setQueue((q) => q.map((x, j) => (j === i ? { ...x, state: 'up', text: 'uploading…' } : x)));
       try {
         const prepared = await compressIfNeeded(list[i]);
         const fd = new FormData();
@@ -194,22 +200,17 @@ export default function AdminPage() {
         if (r.success) {
           ok += 1;
           setPhotos((p) => [r.photo, ...p]);
+          setQueue((q) => q.map((x, j) => (j === i ? { ...x, state: 'ok', text: 'uploaded' } : x)));
         } else {
-          setUpStatus({ ok: false, text: `Failed: ${r.error}` });
-          break;
+          setQueue((q) => q.map((x, j) => (j === i ? { ...x, state: 'err', text: r.error || 'failed' } : x)));
         }
       } catch (e) {
-        setUpStatus({ ok: false, text: `Failed: ${e.message}` });
-        break;
+        setQueue((q) => q.map((x, j) => (j === i ? { ...x, state: 'err', text: e.message } : x)));
       }
     }
-    if (ok === list.length) {
-      setUpStatus({ ok: true, text: `Uploaded ${ok} photo${ok === 1 ? '' : 's'}.` });
-    }
     setUpBusy(false);
-    setUploadFiles(null);
-    const el = document.getElementById('upload-input');
-    if (el) el.value = '';
+    if (fileRef.current) fileRef.current.value = '';
+    setTimeout(() => setQueue([]), 4000);
   };
 
   const saveSettings = async () => {
@@ -229,174 +230,254 @@ export default function AdminPage() {
   };
 
   const runTest = async () => {
-    setTestBusy(true);
-    setTestResult(null);
+    setConn(null);
     const r = await api('/api/admin/test', {}, token);
-    setTestResult(
+    setConn(
       r.success
-        ? { ok: true, text: `${r.bot} → ${r.chat.title} (${r.chat.type}) — database: ${r.database}` }
-        : { ok: false, text: r.error || 'Connection failed' }
+        ? { ok: true, text: `Connected — ${r.bot}`, detail: `${r.chat.title} · database: ${r.database}` }
+        : { ok: false, text: 'Storage check failed', detail: r.error }
     );
-    setTestBusy(false);
   };
 
   if (authed === null) {
-    return <div className="empty">Loading…</div>;
+    return (
+      <div className="admin-shell">
+        <div className="admin-bg" aria-hidden="true" />
+        <div className="login-stage">
+          <div className="login-card glass">
+            <BrandMark />
+            <div className="who">QNXEITSG</div>
+            <p className="hint">Loading…</p>
+          </div>
+        </div>
+      </div>
+    );
   }
 
   if (!authed) {
     return (
-      <div className="admin-wrap">
-        <div className="card login-box">
-          <h1 className="name small">QNXEITSG</h1>
-          <p className="hint">Enter the editor PIN to manage the site.</p>
-          <form onSubmit={handleLogin}>
-            <input
-              className="input pin-input"
-              type="password"
-              inputMode="numeric"
-              placeholder="••••••"
-              value={pin}
-              onChange={(e) => setPin(e.target.value)}
-              autoFocus
-            />
-            {pinError && <p className="status-text err">{pinError}</p>}
-            <button className="btn btn-wide" type="submit" disabled={pinBusy || !pin}>
-              {pinBusy ? 'Checking…' : 'Unlock'}
-            </button>
-          </form>
+      <div className="admin-shell">
+        <div className="admin-bg" aria-hidden="true" />
+        <div className="login-stage">
+          <div className="login-card glass">
+            <BrandMark />
+            <div className="who">QNXEITSG</div>
+            <p className="hint">Enter the editor PIN to manage the site.</p>
+            <form onSubmit={handleLogin}>
+              <input
+                className="input pin-input"
+                type="password"
+                inputMode="numeric"
+                placeholder="••••••"
+                value={pin}
+                onChange={(e) => setPin(e.target.value)}
+                autoFocus
+              />
+              {pinError && <p className="status-text err">{pinError}</p>}
+              <button className="gbtn primary btn-wide" type="submit" disabled={pinBusy || !pin} style={{ width: '100%', marginTop: 16 }}>
+                {pinBusy ? 'Checking…' : 'Unlock editor'}
+              </button>
+            </form>
+            <p className="login-foot">Editor access is URL-only · sessions end when this tab closes</p>
+          </div>
         </div>
       </div>
     );
   }
 
+  const connPillClass = !conn ? 'checking' : conn.ok ? 'ok' : 'bad';
+  const connPillText = !conn ? 'Checking storage…' : conn.text;
+
   return (
-    <div className="admin-wrap">
-      <div className="topline">
-        <h1 className="name small">QNXEITSG</h1>
-        <button className="btn btn-sm btn-ghost" onClick={handleLogout}>
-          Log out
-        </button>
-      </div>
-
-      {loadError && <div className="card"><p className="status-text err">{loadError}</p></div>}
-
-      <div className="card">
-        <h2>Upload photos</h2>
-        <p className="hint">JPG, PNG, WEBP or GIF. Files over 4MB are compressed automatically.</p>
-        <div className="upload-row">
-          <input
-            id="upload-input"
-            type="file"
-            accept="image/*"
-            multiple
-            disabled={upBusy}
-            onChange={(e) => setUploadFiles(e.target.files)}
-          />
-          <button className="btn" onClick={handleUpload} disabled={upBusy || !uploadFiles?.length}>
-            {upBusy ? 'Uploading…' : 'Upload'}
-          </button>
-        </div>
-        {upStatus && <p className={upStatus.ok === false ? 'status-text err' : 'status-text ok'}>{upStatus.text}</p>}
-      </div>
-
-      <div className="card">
-        <h2>Photos ({photos.length})</h2>
-        {!loaded ? (
-          <p className="hint">Loading…</p>
-        ) : photos.length === 0 ? (
-          <p className="hint">No photos yet — upload your first one above.</p>
-        ) : (
-          <div className="photo-list">
-            {photos.map((p) => (
-              <PhotoRow
-                key={p.id}
-                photo={p}
-                token={token}
-                onDeleted={() => setPhotos((list) => list.filter((x) => x.id !== p.id))}
-              />
-            ))}
+    <div className="admin-shell">
+      <div className="admin-bg" aria-hidden="true" />
+      <div className="wrap">
+        <div className="admin-hero">
+          <div className="hero-id">
+            <BrandMark />
+            <div>
+              <div className="kicker">Control Room</div>
+              <div className="who">{siteName || 'QNXEITSG'}</div>
+            </div>
           </div>
-        )}
-      </div>
-
-      <div className="card">
-        <h2>Site &amp; social links</h2>
-        <label className="field-label">Site name</label>
-        <input
-          className="input"
-          value={siteName}
-          onChange={(e) => setSiteName(e.target.value)}
-          placeholder="QNXEITSG"
-        />
-        <label className="field-label">Tagline (optional)</label>
-        <input
-          className="input"
-          value={tagline}
-          onChange={(e) => setTagline(e.target.value)}
-          placeholder="One line about you or your work"
-        />
-
-        <label className="field-label">Social links</label>
-        {socials.map((s, i) => (
-          <div className="social-row" key={i}>
-            <input
-              className="input"
-              style={{ maxWidth: '150px' }}
-              placeholder="Label"
-              value={s.label}
-              onChange={(e) =>
-                setSocials((list) => list.map((x, j) => (j === i ? { ...x, label: e.target.value } : x)))
-              }
-            />
-            <input
-              className="input"
-              placeholder="https://…"
-              value={s.url}
-              onChange={(e) =>
-                setSocials((list) => list.map((x, j) => (j === i ? { ...x, url: e.target.value } : x)))
-              }
-            />
-            <button
-              className="btn btn-sm btn-danger"
-              onClick={() => setSocials((list) => list.filter((_, j) => j !== i))}
-              aria-label="Remove link"
-            >
-              ×
+          <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+            <span className={`pill ${connPillClass}`}>
+              <span className="dot" />
+              {connPillText}
+            </span>
+            <button className="gbtn sm" onClick={handleLogout}>
+              Log out
             </button>
           </div>
-        ))}
-        <button className="btn btn-sm btn-ghost" onClick={() => setSocials((l) => [...l, { label: '', url: '' }])}>
-          + Add link
-        </button>
+        </div>
 
-        <div className="save-row">
-          <button className="btn" onClick={saveSettings} disabled={settingsBusy}>
-            {settingsBusy ? 'Saving…' : 'Save site settings'}
-          </button>
-          {settingsMsg && (
-            <span className={settingsMsg.ok ? 'status-text ok' : 'status-text err'}>{settingsMsg.text}</span>
-          )}
+        <div className="stat-row">
+          <div className="stat-card glass">
+            <div className="stat-num">{loaded ? photos.length : '…'}</div>
+            <div className="stat-label">Photos live</div>
+          </div>
+          <div className="stat-card glass">
+            <div className="stat-num">Telegram</div>
+            <div className="stat-label">Storage</div>
+            <div className="stat-sub">private channel · bot API</div>
+          </div>
+          <div className="stat-card glass">
+            <div className="stat-num">Memory</div>
+            <div className="stat-label">Session</div>
+            <div className="stat-sub">PIN required each visit</div>
+          </div>
+        </div>
+
+        {loadError && (
+          <div className="panel glass span-2" style={{ marginBottom: 16 }}>
+            <p className="status-text err">{loadError}</p>
+          </div>
+        )}
+
+        <div className="admin-grid">
+          <div className="panel glass">
+            <h2>⬆ Upload photos</h2>
+            <p className="sub">JPG, PNG, WEBP or GIF — large files are compressed automatically.</p>
+            <div
+              className={`dropzone${dragOver ? ' drag' : ''}`}
+              onClick={() => fileRef.current?.click()}
+              onDragOver={(e) => {
+                e.preventDefault();
+                setDragOver(true);
+              }}
+              onDragLeave={() => setDragOver(false)}
+              onDrop={(e) => {
+                e.preventDefault();
+                setDragOver(false);
+                uploadFiles(e.dataTransfer.files);
+              }}
+              role="button"
+              tabIndex={0}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') fileRef.current?.click();
+              }}
+            >
+              <span className="dz-icon">🖼️</span>
+              <span className="dz-main">Drag &amp; drop photos here</span>
+              <div className="dz-hint">or click to browse from your device</div>
+            </div>
+            <input
+              ref={fileRef}
+              id="upload-input"
+              type="file"
+              accept="image/*"
+              multiple
+              style={{ display: 'none' }}
+              onChange={(e) => uploadFiles(e.target.files)}
+            />
+            {queue.length > 0 && (
+              <div className="queue">
+                {queue.map((q, i) => (
+                  <div className="queue-item" key={i}>
+                    <span>{q.name}</span>
+                    <span className={`q-status ${q.state}`}>{q.text}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+            <button className="gbtn primary" style={{ marginTop: 14 }} onClick={() => fileRef.current?.click()} disabled={upBusy}>
+              {upBusy ? 'Uploading…' : 'Browse files'}
+            </button>
+          </div>
+
+          <div className="panel glass">
+            <h2>🎛 Site &amp; social links</h2>
+            <p className="sub">Shown on the public homepage header.</p>
+            <label className="field-label">Site name</label>
+            <input className="input" value={siteName} onChange={(e) => setSiteName(e.target.value)} placeholder="QNXEITSG" />
+            <label className="field-label">Tagline (optional)</label>
+            <input
+              className="input"
+              value={tagline}
+              onChange={(e) => setTagline(e.target.value)}
+              placeholder="One line about you or your work"
+            />
+            <label className="field-label">Social links</label>
+            {socials.map((s, i) => (
+              <div className="social-row" key={i}>
+                <input
+                  className="input"
+                  style={{ maxWidth: '140px' }}
+                  placeholder="Label"
+                  value={s.label}
+                  onChange={(e) => setSocials((list) => list.map((x, j) => (j === i ? { ...x, label: e.target.value } : x)))}
+                />
+                <input
+                  className="input"
+                  placeholder="https://…"
+                  value={s.url}
+                  onChange={(e) => setSocials((list) => list.map((x, j) => (j === i ? { ...x, url: e.target.value } : x)))}
+                />
+                <button
+                  className="gbtn sm danger"
+                  onClick={() => setSocials((list) => list.filter((_, j) => j !== i))}
+                  aria-label="Remove link"
+                >
+                  ×
+                </button>
+              </div>
+            ))}
+            <button className="gbtn sm" onClick={() => setSocials((l) => [...l, { label: '', url: '' }])}>
+              + Add link
+            </button>
+            <div className="save-row">
+              <button className="gbtn primary" onClick={saveSettings} disabled={settingsBusy}>
+                {settingsBusy ? 'Saving…' : 'Save & publish'}
+              </button>
+              {settingsMsg && (
+                <span className={settingsMsg.ok ? 'status-text ok' : 'status-text err'}>{settingsMsg.text}</span>
+              )}
+            </div>
+          </div>
+
+          <div className="panel glass span-2">
+            <h2>🖼 Photo manager ({photos.length})</h2>
+            <p className="sub">Titles and descriptions appear in the gallery and lightbox. Deleting also removes the Telegram message.</p>
+            {!loaded ? (
+              <p className="hint">Loading…</p>
+            ) : photos.length === 0 ? (
+              <p className="hint">No photos yet — upload your first one above.</p>
+            ) : (
+              <div className="photo-tiles">
+                {photos.map((p) => (
+                  <Tile
+                    key={p.id}
+                    photo={p}
+                    token={token}
+                    onDeleted={() => setPhotos((list) => list.filter((x) => x.id !== p.id))}
+                  />
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div className="panel glass span-2">
+            <h2>📡 Telegram storage</h2>
+            <p className="sub">
+              Photos live as messages in your private channel; the site database is a JSON document whose pointer is
+              published in the channel description.
+            </p>
+            <button className="gbtn" onClick={runTest}>
+              Run storage check
+            </button>
+            {conn && (
+              <p className="status-text" style={{ marginTop: 10, color: conn.ok ? 'var(--ok)' : 'var(--err)' }}>
+                {conn.text}
+                {conn.detail ? ` — ${conn.detail}` : ''}
+              </p>
+            )}
+          </div>
+
+          <p className="hint center span-2" style={{ gridColumn: '1 / -1' }}>
+            <a href="/">← View live site</a>
+          </p>
         </div>
       </div>
-
-      <div className="card">
-        <h2>Telegram storage</h2>
-        <p className="hint">
-          Checks that the bot token works, the bot can reach your channel, and the database file is
-          readable.
-        </p>
-        <button className="btn btn-ghost" onClick={runTest} disabled={testBusy}>
-          {testBusy ? 'Testing…' : 'Test connection'}
-        </button>
-        {testResult && (
-          <p className={testResult.ok ? 'status-text ok' : 'status-text err'}>{testResult.text}</p>
-        )}
-      </div>
-
-      <p className="hint center">
-        <a href="/">← Back to the site</a>
-      </p>
     </div>
   );
 }
