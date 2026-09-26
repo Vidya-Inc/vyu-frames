@@ -1,7 +1,7 @@
 import './globals.css';
 
 export const metadata = {
-  title: 'vyu.frames',
+  title: 'QNXEITSG',
   description: 'Photography portfolio',
 };
 

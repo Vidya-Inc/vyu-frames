@@ -1,8 +1,7 @@
 export const dynamic = 'force-dynamic';
 
+// The admin token lives in the browser tab's memory; "logging out" is simply
+// the client discarding it.
 export async function POST() {
-  return Response.json(
-    { success: true },
-    { headers: { 'Set-Cookie': 'vf_admin=; HttpOnly; Path=/; Max-Age=0; SameSite=Lax' } }
-  );
+  return Response.json({ success: true });
 }

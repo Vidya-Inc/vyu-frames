@@ -1,6 +1,5 @@
 import {
   createToken,
-  cookieHeader,
   pinMatches,
   checkRateLimit,
   recordFailure,
@@ -37,8 +36,7 @@ export async function POST(request) {
   }
 
   clearFailures(ip);
-  return Response.json(
-    { success: true },
-    { headers: { 'Set-Cookie': cookieHeader(createToken()) } }
-  );
+  // Token goes back in the response body; the client keeps it in memory only,
+  // so every fresh visit to /admin requires the PIN again.
+  return Response.json({ success: true, token: createToken() });
 }

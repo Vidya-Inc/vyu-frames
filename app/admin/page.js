@@ -29,10 +29,13 @@ async function compressIfNeeded(file) {
   return new File([blob], file.name.replace(/\.[^.]+$/, '') + '.jpg', { type: 'image/jpeg' });
 }
 
-async function api(path, opts = {}) {
+// token lives in React state only — never persisted — so a fresh visit to
+// /admin always starts at the PIN screen.
+async function api(path, opts = {}, token = null) {
   const res = await fetch(path, {
     ...opts,
     headers: {
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...(opts.body && !(opts.body instanceof FormData) ? { 'Content-Type': 'application/json' } : {}),
     },
   });
@@ -43,7 +46,7 @@ async function api(path, opts = {}) {
   return { status: res.status, ...data };
 }
 
-function PhotoRow({ photo, onDeleted }) {
+function PhotoRow({ photo, token, onDeleted }) {
   const [title, setTitle] = useState(photo.title || '');
   const [desc, setDesc] = useState(photo.desc || '');
   const [busy, setBusy] = useState(false);
@@ -55,7 +58,7 @@ function PhotoRow({ photo, onDeleted }) {
     const r = await api('/api/admin/photo', {
       method: 'PATCH',
       body: JSON.stringify({ id: photo.id, title, desc }),
-    });
+    }, token);
     setBusy(false);
     if (r.success) {
       setMsg({ ok: true, text: 'Saved' });
@@ -69,7 +72,7 @@ function PhotoRow({ photo, onDeleted }) {
     if (!window.confirm('Delete this photo? Its Telegram message is removed too.')) return;
     setBusy(true);
     setMsg(null);
-    const r = await api(`/api/admin/photo?id=${encodeURIComponent(photo.id)}`, { method: 'DELETE' });
+    const r = await api(`/api/admin/photo?id=${encodeURIComponent(photo.id)}`, { method: 'DELETE' }, token);
     setBusy(false);
     if (r.success) onDeleted();
     else setMsg({ ok: false, text: r.error || 'Failed to delete' });
@@ -107,6 +110,7 @@ function PhotoRow({ photo, onDeleted }) {
 
 export default function AdminPage() {
   const [authed, setAuthed] = useState(null); // null = checking
+  const [token, setToken] = useState(null);
   const [pin, setPin] = useState('');
   const [pinError, setPinError] = useState('');
   const [pinBusy, setPinBusy] = useState(false);
@@ -130,13 +134,16 @@ export default function AdminPage() {
 
   useEffect(() => {
     api('/api/me').then((r) => setAuthed(Boolean(r.authed)));
-    const onExpired = () => setAuthed(false);
+    const onExpired = () => {
+      setAuthed(false);
+      setToken(null);
+    };
     window.addEventListener('vf-session-expired', onExpired);
     return () => window.removeEventListener('vf-session-expired', onExpired);
   }, []);
 
   useEffect(() => {
-    if (!authed) return;
+    if (!authed || !token) return;
     api('/api/photos').then((r) => {
       setLoaded(true);
       if (r.success) {
@@ -148,7 +155,7 @@ export default function AdminPage() {
         setLoadError(r.error || 'Failed to load');
       }
     });
-  }, [authed]);
+  }, [authed, token]);
 
   const handleLogin = async (e) => {
     e.preventDefault();
@@ -156,8 +163,9 @@ export default function AdminPage() {
     setPinError('');
     const r = await api('/api/login', { method: 'POST', body: JSON.stringify({ pin }) });
     setPinBusy(false);
-    if (r.success) {
+    if (r.success && r.token) {
       setPin('');
+      setToken(r.token);
       setAuthed(true);
     } else {
       setPinError(r.error || 'Login failed');
@@ -165,7 +173,8 @@ export default function AdminPage() {
   };
 
   const handleLogout = async () => {
-    await api('/api/logout', { method: 'POST' });
+    await api('/api/logout', { method: 'POST' }, token);
+    setToken(null);
     setAuthed(false);
   };
 
@@ -181,7 +190,7 @@ export default function AdminPage() {
         const prepared = await compressIfNeeded(list[i]);
         const fd = new FormData();
         fd.append('file', prepared);
-        const r = await api('/api/admin/upload', { method: 'POST', body: fd });
+        const r = await api('/api/admin/upload', { method: 'POST', body: fd }, token);
         if (r.success) {
           ok += 1;
           setPhotos((p) => [r.photo, ...p]);
@@ -209,7 +218,7 @@ export default function AdminPage() {
     const r = await api('/api/admin/data', {
       method: 'PUT',
       body: JSON.stringify({ siteName, tagline, socials }),
-    });
+    }, token);
     setSettingsBusy(false);
     if (r.success) {
       setSettingsMsg({ ok: true, text: 'Saved and live.' });
@@ -222,7 +231,7 @@ export default function AdminPage() {
   const runTest = async () => {
     setTestBusy(true);
     setTestResult(null);
-    const r = await api('/api/admin/test');
+    const r = await api('/api/admin/test', {}, token);
     setTestResult(
       r.success
         ? { ok: true, text: `${r.bot} → ${r.chat.title} (${r.chat.type}) — database: ${r.database}` }
@@ -239,8 +248,8 @@ export default function AdminPage() {
     return (
       <div className="admin-wrap">
         <div className="card login-box">
-          <h1 className="name small">Admin</h1>
-          <p className="hint">Enter the PIN to manage the site.</p>
+          <h1 className="name small">QNXEITSG</h1>
+          <p className="hint">Enter the editor PIN to manage the site.</p>
           <form onSubmit={handleLogin}>
             <input
               className="input pin-input"
@@ -264,7 +273,7 @@ export default function AdminPage() {
   return (
     <div className="admin-wrap">
       <div className="topline">
-        <h1 className="name small">Admin</h1>
+        <h1 className="name small">QNXEITSG</h1>
         <button className="btn btn-sm btn-ghost" onClick={handleLogout}>
           Log out
         </button>
@@ -303,6 +312,7 @@ export default function AdminPage() {
               <PhotoRow
                 key={p.id}
                 photo={p}
+                token={token}
                 onDeleted={() => setPhotos((list) => list.filter((x) => x.id !== p.id))}
               />
             ))}
@@ -317,7 +327,7 @@ export default function AdminPage() {
           className="input"
           value={siteName}
           onChange={(e) => setSiteName(e.target.value)}
-          placeholder="vyu.frames"
+          placeholder="QNXEITSG"
         />
         <label className="field-label">Tagline (optional)</label>
         <input

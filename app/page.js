@@ -77,8 +77,7 @@ export default function Home() {
         )}
 
         <footer className="site-foot">
-          <span>{data?.siteName || 'vyu.frames'}</span>
-          <a href="/admin">admin</a>
+          <span>{data?.siteName || 'QNXEITSG'}</span>
         </footer>
       </section>
 

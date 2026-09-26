@@ -5,7 +5,7 @@ import SocialIcon from './SocialIcon';
 // Full-viewport landing screen. The visitor sees only this until they choose
 // to enter (button or scroll) — the gallery lives below the fold.
 export default function LandingHero({ siteName, tagline, socials, heroSrc, photoCount, warning, error, loading }) {
-  const name = siteName || 'vyu.frames';
+  const name = siteName || 'QNXEITSG';
 
   return (
     <section className="landing" id="top">
@@ -35,11 +35,7 @@ export default function LandingHero({ siteName, tagline, socials, heroSrc, photo
           </p>
         )}
         {!loading && !error && !warning && photoCount === 0 && (
-          <p className="landing-note">
-            No photos yet.
-            <br />
-            Add your first one from the <a href="/admin" className="empty-link">admin dashboard</a>.
-          </p>
+          <p className="landing-note">No photos yet.</p>
         )}
 
         <div className="landing-row">
